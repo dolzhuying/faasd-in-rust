@@ -366,6 +366,27 @@ impl ImageManager {
         }
     }
 
+    fn extract_ports_from_env(env: &Vec<String>) -> Option<Vec<String>> {
+        let mut ports = Vec::new();
+        let mut upstream_url = None;
+        for var in env {
+            if let Some((key, value)) = var.split_once('=') {
+                if key == "upstream_url" {
+                    upstream_url = Some(value.to_string());
+                    break;
+                }
+            }
+        }
+        if let Some(url_str) = upstream_url {
+            if let Some(port) = url_str.split(':').next_back() {
+                let port_str = format!("{}/tcp", port);
+                ports.push(port_str);
+            }
+        }
+
+        Some(ports)
+    }
+
     pub fn get_runtime_config(image_name: &str) -> Result<ImageRuntimeConfig, ImageError> {
         let map = GLOBAL_IMAGE_MAP.read().unwrap();
         if let Some(config) = map.get(image_name) {
@@ -374,15 +395,12 @@ impl ImageManager {
                     .env()
                     .clone()
                     .expect("Failed to get environment variables");
-                let args = config
-                    .cmd()
-                    .clone()
-                    .expect("Failed to get command arguments");
-                let ports = config
-                    .exposed_ports()
-                    .clone()
-                    .expect("Failed to get exposed ports");
-                Ok(ImageRuntimeConfig::new(env, args, ports))
+                let args = config.cmd().clone().unwrap_or_default();
+                let ports = config.exposed_ports().clone().unwrap_or_default();
+                let env_ports = Self::extract_ports_from_env(&env).unwrap_or_default();
+                let mut combined_ports = ports.clone();
+                combined_ports.extend(env_ports);
+                Ok(ImageRuntimeConfig::new(env, args, combined_ports))
             } else {
                 Err(ImageError::ImageConfigurationNotFound(format!(
                     "Image configuration is empty for image {}",
