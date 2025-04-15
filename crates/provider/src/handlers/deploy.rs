@@ -79,7 +79,7 @@ async fn deploy(service: &Arc<Service>, config: &FunctionDeployment) -> Result<(
         .map_err(|e| CustomError::OtherError(format!("failed to create container:{}", e)))?;
 
     log::info!(
-        "Container {} created using image {} in namespace {}",
+        "Container {:?} created using image {:?} in namespace {:?}",
         &config.service,
         &config.image,
         namespace
