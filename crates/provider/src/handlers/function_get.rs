@@ -27,7 +27,7 @@ pub async fn get_function(
     namespace: &str,
 ) -> Result<Function, FunctionError> {
     let cid = function_name;
-    let address = service.get_address(cid).await.unwrap_or_default();
+    let address = service.get_address(cid,namespace).await.unwrap_or_default();
 
     let container = service
         .load_container(cid, namespace)

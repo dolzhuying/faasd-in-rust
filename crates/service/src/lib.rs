@@ -30,7 +30,7 @@ use tokio::time::timeout;
 // config.json,dockerhub密钥
 // const DOCKER_CONFIG_DIR: &str = "/var/lib/faasd/.docker/";
 
-type NetnsMap = Arc<RwLock<HashMap<String, NetworkConfig>>>;
+type NetnsMap = Arc<RwLock<HashMap<(String,String), NetworkConfig>>>;
 lazy_static::lazy_static! {
     static ref GLOBAL_NETNS_MAP: NetnsMap = Arc::new(RwLock::new(HashMap::new()));
 }
@@ -51,29 +51,29 @@ impl Service {
         })
     }
 
-    pub async fn save_network_config(&self, cid: &str, net_conf: NetworkConfig) {
+    pub async fn save_network_config(&self, cid: &str, ns: &str, net_conf: NetworkConfig) {
         let mut map = self.netns_map.write().unwrap();
-        map.insert(cid.to_string(), net_conf);
+        map.insert((cid.to_string(),ns.to_string()), net_conf);
     }
 
-    pub async fn get_network_config(&self, cid: &str) -> Option<NetworkConfig> {
+    pub async fn get_network_config(&self, cid: &str,ns: &str) -> Option<NetworkConfig> {
         let map = self.netns_map.read().unwrap();
-        map.get(cid).cloned()
+        map.get(&(cid.to_string(),ns.to_string())).cloned()
     }
 
-    pub async fn get_ip(&self, cid: &str) -> Option<String> {
+    pub async fn get_ip(&self, cid: &str,ns: &str) -> Option<String> {
         let map = self.netns_map.read().unwrap();
-        map.get(cid).map(|net_conf| net_conf.get_ip())
+        map.get(&(cid.to_string(),ns.to_string())).map(|net_conf| net_conf.get_ip())
     }
 
-    pub async fn get_address(&self, cid: &str) -> Option<String> {
+    pub async fn get_address(&self, cid: &str,ns: &str) -> Option<String> {
         let map = self.netns_map.read().unwrap();
-        map.get(cid).map(|net_conf| net_conf.get_address())
+        map.get(&(cid.to_string(),ns.to_string())).map(|net_conf| net_conf.get_address())
     }
 
-    pub async fn remove_netns_ip(&self, cid: &str) {
+    pub async fn remove_netns_ip(&self, cid: &str,ns: &str) {
         let mut map = self.netns_map.write().unwrap();
-        map.remove(cid);
+        map.remove(&(cid.to_string(),ns.to_string()));
     }
 
     async fn prepare_snapshot(&self, cid: &str, ns: &str, img_name: &str) -> Result<(), Err> {
@@ -190,7 +190,7 @@ impl Service {
                 .await
                 .expect("Failed to delete container");
             //todo 这里删除cni?
-            self.remove_netns_ip(cid).await;
+            self.remove_netns_ip(cid,ns).await;
 
             log::info!("Container: {:?} deleted", cc);
         } else {
@@ -236,7 +236,7 @@ impl Service {
         let ports = ImageManager::get_runtime_config(img_name).unwrap().ports;
         let network_config = NetworkConfig::new(path, ip, ports);
         log::info!("create_cni_network ok");
-        self.save_network_config(cid, network_config.clone()).await;
+        self.save_network_config(cid, ns, network_config.clone()).await;
         log::info!("save_netns_ip ok, netconfig: {:?}", network_config);
         let mut tc = self.client.tasks();
         let req = CreateTaskRequest {
