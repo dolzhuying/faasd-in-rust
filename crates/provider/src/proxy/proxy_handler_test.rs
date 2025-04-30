@@ -87,12 +87,12 @@ mod test {
     #[actix_web::test]
     async fn test_handler_func_empty_function_nam() {
         let app = test::init_service(
-            App::new().route("/function/{name}{path:/?.*}", web::to(proxy_handler)),
+            App::new().route("/function{name:/?}{path:/?.*}", web::to(proxy_handler)),
         )
         .await;
 
         let req = test::TestRequest::post()
-            .uri("/function/")
+            .uri("/function")
             .insert_header((http::header::CONTENT_TYPE, "application/json"))
             .set_payload(Bytes::from_static(b"{\"key\":\"value\"}"))
             .to_request();
