@@ -37,7 +37,7 @@ mod integration_tests {
             .uri("/function/test-no-found-function")
             .to_request();
         let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
         let response_body = test::read_body(resp).await;
         let response_str = std::str::from_utf8(&response_body).unwrap();
         assert!(response_str.contains("Failed to get function"));
