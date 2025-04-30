@@ -1,18 +1,18 @@
 use crate::handlers::invoke_resolver::InvokeResolver;
-use crate::proxy::builder::build_proxy_request;
-use crate::proxy::client::new_proxy_client_from_config;
-use crate::types::config::FaaSConfig;
-use actix_web::{Error, HttpRequest, HttpResponse, Responder, http::Method, web};
+use crate::proxy::builder::create_proxy_request;
+
+use actix_web::{
+    HttpRequest, HttpResponse,
+    error::{ErrorBadRequest, ErrorInternalServerError, ErrorMethodNotAllowed},
+    http::Method,
+    web,
+};
 
 // 主要参考源码的响应设置
 pub async fn proxy_handler(
-    config: web::Data<FaaSConfig>,
     req: HttpRequest,
     payload: web::Payload,
-) -> impl Responder {
-    let proxy_client = new_proxy_client_from_config(config.as_ref()).await;
-    log::info!("proxy_client : {:?}", proxy_client);
-
+) -> actix_web::Result<HttpResponse> {
     match *req.method() {
         Method::POST
         | Method::PUT
@@ -20,11 +20,8 @@ pub async fn proxy_handler(
         | Method::GET
         | Method::PATCH
         | Method::HEAD
-        | Method::OPTIONS => match proxy_request(&req, payload, &proxy_client).await {
-            Ok(resp) => resp,
-            Err(e) => HttpResponse::from_error(e),
-        },
-        _ => HttpResponse::MethodNotAllowed().body("method not allowed"),
+        | Method::OPTIONS => proxy_request(&req, payload).await,
+        _ => Err(ErrorMethodNotAllowed("Method not allowed")),
     }
 }
 
@@ -32,36 +29,30 @@ pub async fn proxy_handler(
 async fn proxy_request(
     req: &HttpRequest,
     payload: web::Payload,
-    proxy_client: &reqwest::Client,
-) -> Result<HttpResponse, Error> {
+) -> actix_web::Result<HttpResponse> {
     let function_name = req.match_info().get("name").unwrap_or("");
     if function_name.is_empty() {
-        return Ok(HttpResponse::BadRequest().body("provide function name in path"));
+        return Err(ErrorBadRequest("Function name is required"));
     }
 
-    let function_addr = match InvokeResolver::resolve_function_url(function_name).await {
-        Ok(function_addr) => function_addr,
-        Err(e) => return Ok(HttpResponse::BadRequest().body(e.to_string())),
-    };
+    let function_addr = InvokeResolver::resolve_function_url(function_name).await?;
 
-    let proxy_req = match build_proxy_request(req, &function_addr, proxy_client, payload).await {
-        Ok(proxy_req) => proxy_req,
-        Err(e) => return Ok(HttpResponse::InternalServerError().body(e.to_string())),
-    };
+    let proxy_req = create_proxy_request(req, &function_addr, payload);
 
-    match proxy_req.send().await {
-        Ok(resp) => {
-            let status = resp.status();
-            let mut client_resp = HttpResponse::build(status);
-
-            for (name, value) in resp.headers().iter() {
-                client_resp.insert_header((name.clone(), value.clone()));
-            }
-
-            let body = resp.bytes().await.unwrap();
-
-            Ok(client_resp.body(body))
+    // Handle the error conversion explicitly
+    let proxy_resp = match proxy_req.await {
+        Ok(resp) => resp,
+        Err(e) => {
+            return Err(ErrorInternalServerError(format!(
+                "Proxy request failed: {}",
+                e
+            )));
         }
-        Err(e) => Ok(HttpResponse::InternalServerError().body(e.to_string())),
-    }
+    };
+
+    // Now create an HttpResponse from the proxy response
+    let mut client_resp = HttpResponse::build(proxy_resp.status());
+
+    // Stream the response body
+    Ok(client_resp.streaming(proxy_resp))
 }
